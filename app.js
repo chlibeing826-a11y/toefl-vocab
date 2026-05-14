@@ -279,26 +279,30 @@ function uuid() {
   });
 }
 
+const TZ = 'Asia/Singapore';
+
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  // Returns YYYY-MM-DD in Singapore time (UTC+8)
+  return new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 }
 
 function addDays(dateStr, n) {
-  const d = new Date(dateStr + 'T00:00:00');
+  const d = new Date(dateStr + 'T00:00:00+08:00');
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return d.toLocaleDateString('en-CA', { timeZone: TZ });
 }
 
 function formatDate(iso) {
   if (!iso) return '—';
-  const d = new Date(iso + 'T00:00:00');
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  return new Date(iso + 'T00:00:00+08:00').toLocaleDateString('zh-CN', {
+    timeZone: TZ, month: 'short', day: 'numeric',
+  });
 }
 
 function formatDayOfWeek(iso) {
-  const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  const d = new Date(iso + 'T00:00:00');
-  return days[d.getDay()];
+  return new Date(iso + 'T00:00:00+08:00').toLocaleDateString('zh-CN', {
+    timeZone: TZ, weekday: 'short',
+  });
 }
 
 function toast(message, type = 'success') {
