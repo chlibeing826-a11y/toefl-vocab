@@ -109,6 +109,51 @@ const DB = {
       .sort((a, b) => (a.nextReview < b.nextReview ? -1 : 1));
   },
 
+  // Words that have been reviewed before and are now due again
+  getDueReviews() {
+    const todayStr = today();
+    return this.getWords()
+      .filter(w => w.totalReviews > 0 && w.nextReview <= todayStr)
+      .sort((a, b) => (a.nextReview < b.nextReview ? -1 : 1));
+  },
+
+  // Brand-new words (never reviewed), capped by remaining daily allowance
+  getNewWordsForToday() {
+    const settings = this.getSettings();
+    const limit = settings.dailyNewLimit || 20;
+    const todayStr = today();
+    // Words whose first-ever review happened today count against today's quota
+    const usedToday = this.getWords().filter(
+      w => w.totalReviews === 1 && w.lastReview === todayStr
+    ).length;
+    const remaining = Math.max(0, limit - usedToday);
+    if (remaining === 0) return [];
+    return this.getWords()
+      .filter(w => w.totalReviews === 0)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+      .slice(0, remaining);
+  },
+
+  // Summary used by dashboard and review view
+  getTodayPlan() {
+    const settings = this.getSettings();
+    const limit = settings.dailyNewLimit || 20;
+    const todayStr = today();
+    const words = this.getWords();
+    const dueReviews = words.filter(w => w.totalReviews > 0 && w.nextReview <= todayStr);
+    const allNew = words.filter(w => w.totalReviews === 0);
+    const usedToday = words.filter(w => w.totalReviews === 1 && w.lastReview === todayStr).length;
+    const newAvailable = Math.min(allNew.length, Math.max(0, limit - usedToday));
+    return {
+      reviewCount: dueReviews.length,
+      newCount: newAvailable,
+      newPool: allNew.length,
+      usedToday,
+      limit,
+      total: dueReviews.length + newAvailable,
+    };
+  },
+
   getDifficultWords() {
     const session = this.getSession();
     const seen = new Set();
@@ -310,12 +355,11 @@ function shuffle(arr) {
 
 function renderDashboard() {
   const words = DB.getWords();
-  const dueWords = DB.getDueWords();
   const session = DB.getSession();
   const todayStr = today();
+  const plan = DB.getTodayPlan();
 
   const total = words.length;
-  const dueCount = dueWords.length;
   const masteredCount = words.filter(w => getFamiliarity(w) === 'mastered').length;
   const reviewedToday = session.reviews.length;
   const difficultWords = DB.getDifficultWords();
@@ -381,14 +425,14 @@ function renderDashboard() {
 
     <div class="dashboard-grid">
       <div class="stat-card stat-primary">
-        <span class="stat-icon">📋</span>
-        <div class="stat-number">${dueCount}</div>
-        <div class="stat-label">待复习单词</div>
+        <span class="stat-icon">🔄</span>
+        <div class="stat-number">${plan.reviewCount}</div>
+        <div class="stat-label">到期复习</div>
       </div>
       <div class="stat-card stat-info">
-        <span class="stat-icon">📚</span>
-        <div class="stat-number">${total}</div>
-        <div class="stat-label">单词总数</div>
+        <span class="stat-icon">✨</span>
+        <div class="stat-number">${plan.newCount}</div>
+        <div class="stat-label">今日新词 <span style="font-size:11px;opacity:0.7;">/ ${plan.limit}</span></div>
       </div>
       <div class="stat-card stat-success">
         <span class="stat-icon">🏆</span>
@@ -398,9 +442,17 @@ function renderDashboard() {
       <div class="stat-card stat-warning">
         <span class="stat-icon">✅</span>
         <div class="stat-number">${reviewedToday}</div>
-        <div class="stat-label">今日已复习</div>
+        <div class="stat-label">今日已完成</div>
       </div>
     </div>
+
+    ${plan.total > 0 ? `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+      <span>📅 今日计划：</span>
+      <span>🔄 复习 <strong>${plan.reviewCount}</strong> 个</span>
+      <span>✨ 新词 <strong>${plan.newCount}</strong> 个（已学 ${plan.usedToday}，上限 ${plan.limit}）</span>
+      ${plan.newPool > plan.newCount + plan.usedToday ? `<span style="color:var(--text-muted);">词库还剩 ${plan.newPool - plan.usedToday} 个未学</span>` : ''}
+    </div>` : ''}
 
     ${difficultBanner}
 
@@ -414,8 +466,11 @@ function renderDashboard() {
     <div class="card">
       <div class="card-title">快速操作</div>
       <div class="dashboard-actions">
-        <button class="btn btn-primary btn-lg" onclick="Router.navigate('review')" ${dueCount === 0 ? 'disabled' : ''}>
-          <span>🔄</span> 开始复习 ${dueCount > 0 ? `(${dueCount}张)` : '(暂无)'}
+        <button class="btn btn-primary btn-lg" onclick="Router.navigate('review')" ${plan.total === 0 ? 'disabled' : ''}>
+          <span>🔄</span> 开始复习
+          ${plan.total > 0
+            ? `<span style="font-size:13px;opacity:0.85;margin-left:4px;">(复习${plan.reviewCount} + 新词${plan.newCount})</span>`
+            : '<span style="font-size:13px;opacity:0.7;margin-left:4px;">(今日已完成)</span>'}
         </button>
         <button class="btn btn-ghost btn-lg" onclick="Router.navigate('wordlist')">
           <span>📖</span> 管理单词
@@ -896,6 +951,7 @@ function submitImport() {
 
 let reviewState = {
   queue: [],
+  queueBreak: 0,
   currentIdx: 0,
   isFlipped: false,
   sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 },
@@ -903,15 +959,20 @@ let reviewState = {
 };
 
 function renderReview() {
-  const dueWords = DB.getDueWords();
+  const plan = DB.getTodayPlan();
 
-  if (dueWords.length === 0) {
+  if (plan.total === 0) {
+    const newPool = plan.newPool - plan.usedToday;
     return `
       <div class="review-container">
         <div class="empty-state">
           <span class="empty-state-icon">🎉</span>
-          <div class="empty-state-title">今日复习完成！</div>
-          <div class="empty-state-desc">暂无待复习单词。继续添加新词或明天再来！</div>
+          <div class="empty-state-title">今日计划已完成！</div>
+          <div class="empty-state-desc">
+            ${newPool > 0
+              ? `词库还有 <strong>${newPool}</strong> 个未学单词，明天继续或在设置中提高每日上限。`
+              : '暂无待学单词，继续添加新词吧！'}
+          </div>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
             <button class="btn btn-primary" onclick="Router.navigate('wordlist')">📖 管理单词</button>
             <button class="btn btn-ghost" onclick="Router.navigate('dashboard')">🏠 返回首页</button>
@@ -920,11 +981,14 @@ function renderReview() {
       </div>`;
   }
 
-  // Initialize review session
+  // Build queue: due reviews (shuffled) first, then new words (in creation order)
   if (reviewState.queue.length === 0 || reviewState.currentIdx >= reviewState.queue.length) {
-    const shuffled = shuffle(dueWords);
+    const reviews = shuffle(DB.getDueReviews());
+    const newWords = DB.getNewWordsForToday();
+    const queue = [...reviews, ...newWords];
     reviewState = {
-      queue: shuffled.map(w => w.id),
+      queue: queue.map(w => w.id),
+      queueBreak: reviews.length, // index where new words start
       currentIdx: 0,
       isFlipped: false,
       sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 },
@@ -990,7 +1054,12 @@ function renderReviewCard() {
     <div class="review-container" id="review-container">
       <div class="review-header">
         <button class="btn btn-ghost btn-sm" onclick="exitReview()" title="退出复习">✕ 退出</button>
-        <span class="review-progress-text">第 ${currentIdx + 1} / ${queue.length} 张</span>
+        <span class="review-progress-text">
+          第 ${currentIdx + 1} / ${queue.length} 张
+          <span style="font-size:11px;padding:1px 6px;border-radius:10px;margin-left:4px;${currentIdx < (reviewState.queueBreak || 0) ? 'background:#E3F2FD;color:#1565C0;' : 'background:#F3E5F5;color:#6A1B9A;'}">
+            ${currentIdx < (reviewState.queueBreak || 0) ? '复习' : '新词'}
+          </span>
+        </span>
         <div class="review-progress-bar">
           <div class="review-progress-fill" style="width:${progress}%"></div>
         </div>
@@ -1069,6 +1138,7 @@ function reRenderReview() {
 function exitReview() {
   reviewState = {
     queue: [],
+    queueBreak: 0,
     currentIdx: 0,
     isFlipped: false,
     sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 },
@@ -1119,12 +1189,12 @@ function renderReviewSummary() {
 }
 
 function goToStoryAndReset() {
-  reviewState = { queue: [], currentIdx: 0, isFlipped: false, sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 }, repeatedWords: new Set() };
+  reviewState = { queue: [], queueBreak: 0, currentIdx: 0, isFlipped: false, sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 }, repeatedWords: new Set() };
   Router.navigate('story');
 }
 
 function restartReview() {
-  reviewState = { queue: [], currentIdx: 0, isFlipped: false, sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 }, repeatedWords: new Set() };
+  reviewState = { queue: [], queueBreak: 0, currentIdx: 0, isFlipped: false, sessionStats: { total: 0, again: 0, hard: 0, good: 0, easy: 0 }, repeatedWords: new Set() };
   Router.navigate('review');
 }
 
