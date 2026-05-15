@@ -281,41 +281,6 @@ function uuid() {
 
 const TZ = 'Asia/Singapore';
 
-// In-memory cache: lowercase word → audio URL (avoids repeat API calls)
-const audioCache = {};
-
-async function playWordAudio(word, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-  try {
-    let url = audioCache[word.toLowerCase()];
-    if (!url) {
-      const res = await fetch(
-        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`
-      );
-      if (!res.ok) throw new Error('not found');
-      const data = await res.json();
-      const phonetics = data[0]?.phonetics || [];
-      // Prefer US pronunciation, fall back to any available audio
-      const entry = phonetics.find(p => p.audio?.includes('-us'))
-                 || phonetics.find(p => p.audio);
-      if (!entry?.audio) throw new Error('no audio');
-      url = entry.audio.startsWith('//') ? 'https:' + entry.audio : entry.audio;
-      audioCache[word.toLowerCase()] = url;
-    }
-    const audio = new Audio(url);
-    audio.play();
-  } catch {
-    // Fallback to Web Speech API if dictionary audio unavailable
-    if (window.speechSynthesis) {
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(word);
-      u.lang = 'en-US';
-      speechSynthesis.speak(u);
-    }
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔊'; }
-  }
-}
 
 function today() {
   // Returns YYYY-MM-DD in Singapore time (UTC+8)
@@ -663,10 +628,7 @@ function renderWordListItems(allWords, todayStr) {
     return `
       <div class="word-item" onclick="openEditWordModal('${w.id}')">
         <div class="word-item-main">
-          <div class="word-item-word">
-            ${escapeHtml(w.word)}
-            <button class="speak-btn" title="播放美式发音" onclick="event.stopPropagation();playWordAudio('${escapeHtml(w.word)}',this)">🔊</button>
-          </div>
+          <div class="word-item-word">${escapeHtml(w.word)}</div>
           <div class="word-item-def">${escapeHtml(w.definition)}</div>
         </div>
         <div class="word-item-meta">
@@ -1084,17 +1046,15 @@ function renderReviewCard() {
   const passed = passedWords.size;
   const progress = planTotal > 0 ? Math.min((passed / planTotal) * 100, 100) : 0;
 
-  const speakBtn = `<button class="speak-btn speak-btn--card" title="播放美式发音" onclick="event.stopPropagation();playWordAudio('${escapeHtml(card.word)}',this)">🔊</button>`;
-
   const frontHtml = `
     <div class="card-face card-face--front">
-      <div class="card-word">${escapeHtml(card.word)} ${speakBtn}</div>
+      <div class="card-word">${escapeHtml(card.word)}</div>
       <div class="card-hint">💭 点击卡片或按钮查看答案</div>
     </div>`;
 
   const backHtml = `
     <div class="card-face card-face--back">
-      <div class="card-word" style="font-size:28px;">${escapeHtml(card.word)} ${speakBtn}</div>
+      <div class="card-word" style="font-size:28px;">${escapeHtml(card.word)}</div>
       <div class="card-definition">${escapeHtml(card.definition)}</div>
     </div>`;
 
