@@ -678,6 +678,33 @@ body {
   color: var(--danger);
 }
 
+.speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  font-size: 15px;
+  opacity: 0.5;
+  vertical-align: middle;
+  transition: opacity 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.speak-btn:hover { opacity: 1; transform: scale(1.2); }
+.speak-btn:disabled { opacity: 0.3; cursor: default; transform: none; }
+
+.speak-btn--card {
+  font-size: 22px;
+  width: 36px;
+  height: 36px;
+  opacity: 0.6;
+}
+
 /* ============================================================
    FAMILIARITY BADGES
    ============================================================ */
